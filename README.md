@@ -1,5 +1,8 @@
 # TPU nanny
 
+**🚨DO NOT USE – THIS LIBRARY IS OUTDATED!🚨**
+---
+
 TPU nanny is designed to babysit preemptible TPUs. It will keep a number of preemptible TPUs running a user-specified bash script, recreating any TPUs when they get preempted.
 
 This library has similar goals to [tpucare](https://github.com/ClashLuke/tpucare/tree/main) and [tpunicorn](https://github.com/shawwn/tpunicorn); the main differences are that this library is (1)written in pure Python; and (2) has fewer features (hopefully making the code more readable).
