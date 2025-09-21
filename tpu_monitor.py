@@ -13,7 +13,7 @@ def generate_tpu_table(project_id):
 
     # create table
     table = Table()
-    for header in ['ID', 'Zone', 'Type', 'Spot', 'State', 'Created', 'Uptime']:
+    for header in ['ID', 'Zone', 'Type', 'Schedule', 'State', 'Created', 'Uptime']:
         table.add_column(header)
     table.caption = f'Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
     
@@ -27,11 +27,11 @@ def generate_tpu_table(project_id):
             node.name.split('/')[-1], # ID
             node.name.split('/')[3], # zone
             node.accelerator_type, # accelerator type
-            '✅' if node.scheduling_config.spot else '❌', # spot
+            'spot' if node.scheduling_config.spot else 'on-demand', # spot
             node.state.name, # state
             str(timedelta(seconds=round((time_now - time_created).total_seconds()))), # created
             str(timedelta(seconds=round((time_last - time_created).total_seconds()))), # uptime
-            style={'READY': 'dark_green', 'CREATING': 'yellow', 'PREEMPTED': 'red'}[node.state.name] # color
+            style={'READY': 'dark_green', 'CREATING': 'dark_orange', 'PREEMPTED': 'dark_red'}[node.state.name] # color
         )
     return table
 
