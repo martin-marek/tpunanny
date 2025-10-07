@@ -13,7 +13,7 @@ def get_runtime(tpu_type):
     # https://cloud.google.com/tpu/docs/runtimes
     if 'v6e' in tpu_type: return 'v2-alpha-tpuv6e'
     elif 'v5p' in tpu_type: return 'v2-alpha-tpuv5'
-    elif 'v5e' in tpu_type: return 'v2-alpha-tpuv5-lite'
+    elif 'v5lite' in tpu_type: return 'v2-alpha-tpuv5-lite'
     else: return 'tpu-ubuntu2204-base'
 
 
@@ -53,12 +53,12 @@ def _delete(tpu_id, zone, project_id):
 
 
 def _run(tpu_id, zone, project_id, script, hide=False):
-    # runs on single TPU
     """Connects to TPU using SSH and runs `script`."""
     tpu_name = f'projects/{project_id}/locations/{zone}/nodes/{tpu_id}'
     tpu_info = client.get_node(name=tpu_name)
-    tpu_ip_address = tpu_info.network_endpoints[0].ip_address
-    result = Connection(tpu_ip_address).run(script, shell='/bin/bash -l', hide=hide)
+    # internal_ip_address = tpu_info.network_endpoints[0].ip_address
+    external_ip_address = tpu_info.network_endpoints[0].access_config.external_ip
+    result = Connection(external_ip_address).run(script, shell='/bin/bash -l', hide=hide)
     return result
 
 
@@ -68,12 +68,18 @@ def _babysit(tpu_type, tpu_id, zone, project_id, script=None, stream_log=True):
 
     # create logger for this TPU
     logger = logging.getLogger(tpu_id)
-    for handler in logger.handlers[:]: logger.removeHandler(handler)
     logger.setLevel(logging.DEBUG)
+
+    # remove previous log handlers
+    for handler in logger.handlers[:]: logger.removeHandler(handler)
+    
+    # add file handler
     log_format = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
     file_handler = logging.FileHandler(f'logs/{tpu_id}.txt', 'w')
     file_handler.setFormatter(log_format)
     logger.addHandler(file_handler)
+
+    # optionally add stdout handler
     if stream_log:
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(log_format)
@@ -134,7 +140,7 @@ def babysit(num_tpus, tpu_type, zone, project_id, script=None):
     # create and start a thread for each TPU
     threads = []
     for i in range(num_tpus):
-        tpu_id = f'{prefix}-{i}'
+        tpu_id = f'tn-{tpu_type}-{idx}'
         thread = threading.Thread(target=_babysit, args=(tpu_type, tpu_id, zone, project_id, script, False), daemon=True)
         thread.start()
         threads.append(thread)
