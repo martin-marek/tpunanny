@@ -13,25 +13,23 @@ def generate_tpu_table(project_id):
 
     # create empty table
     table = Table()
-    for header in ['ID', 'Zone', 'Type', 'Schedule', 'State', 'Created', 'Uptime']:
+    for header in ['Request ID', 'Zone', 'Type', 'State', 'Created']:
         table.add_column(header)
     table.caption = f'Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
     
     # add nodes to table
-    nodes = client.list_nodes(parent=f'projects/{project_id}/locations/-')
-    for node in sorted(nodes, key=lambda x: x.create_time):
-        time_created = node.create_time
+    queued_resources = client.list_queued_resources(parent=f'projects/{project_id}/locations/-')
+    for qr in sorted(queued_resources, key=lambda x: x.create_time):
+        time_created = qr.create_time
         time_now = datetime.now(time_created.tzinfo)
-        time_last = time_now if not 'maintenance' in node.health_description else parser.parse(node.health_description, fuzzy=True)
+        node = qr.tpu.node_spec[0].node
         table.add_row(
-            node.name.split('/')[-1], # ID
-            node.name.split('/')[3], # zone
+            qr.name.split('/')[-1], # ID
+            qr.name.split('/')[3], # zone
             node.accelerator_type, # accelerator type
-            'spot' if node.scheduling_config.spot else 'on-demand', # spot
-            node.state.name, # state
+            qr.state.state.name, # state
             str(timedelta(seconds=round((time_now - time_created).total_seconds()))).split(',')[0], # created
-            str(timedelta(seconds=round((time_last - time_created).total_seconds()))).split(',')[0], # uptime
-            style={'READY': 'dark_green', 'CREATING': 'dark_orange', 'PREEMPTED': 'dark_red'}[node.state.name] # color
+            style={'ACTIVE': 'dark_green', 'SUSPENDED': 'dark_red'}.get(qr.state.state.name, 'orange1') # color
         )
 
     return table
