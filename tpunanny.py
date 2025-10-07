@@ -63,6 +63,10 @@ def _create(tpu_type, tpu_id, zone, project_id):
 
 
 def _delete(tpu_id, zone, project_id):
+    """
+    This function can only delete TPU in the following states:
+    (ACCEPTED, WAITING_FOR_RESOURCES, SUSPENDED, FAILED)
+    """
     qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
     operation = client.delete_queued_resource(name=qr_name)
     return operation.result()
