@@ -72,7 +72,6 @@ def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None):
     """Connects to TPU using SSH and runs `script`."""
     tpu_name = f'projects/{project_id}/locations/{zone}/nodes/{tpu_id}'
     tpu_info = client.get_node(name=tpu_name)
-    # internal_ip_address = tpu_info.network_endpoints[0].ip_address
     external_ip_address = tpu_info.network_endpoints[0].access_config.external_ip
     result = Connection(external_ip_address).run(
         script,
