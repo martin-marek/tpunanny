@@ -3,7 +3,6 @@ import sys
 import time
 import logging
 import threading
-from types import SimpleNamespace
 from fabric import Connection
 from google.cloud import tpu_v2
 from google.api_core.exceptions import NotFound
