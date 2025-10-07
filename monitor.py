@@ -18,6 +18,15 @@ def generate_tpu_table(project_id):
     table.caption = f'Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
     
     # add nodes to table
+    text_color = {
+        'ACTIVE': 'dark_green',
+        'PROVISIONING': 'dodger_blue2',
+        'WAITING_FOR_RESOURCES': 'medium_purple1',
+        'SUSPENDING': 'dark_red',
+        'SUSPENDED': 'dark_red',
+        'FAILED': 'dark_red',
+        'OTHER': 'grey50'
+    }
     queued_resources = client.list_queued_resources(parent=f'projects/{project_id}/locations/-')
     for qr in sorted(queued_resources, key=lambda x: x.create_time):
         time_created = qr.create_time
@@ -29,7 +38,7 @@ def generate_tpu_table(project_id):
             node.accelerator_type, # accelerator type
             qr.state.state.name, # state
             str(timedelta(seconds=round((time_now - time_created).total_seconds()))).split(',')[0], # created
-            style={'ACTIVE': 'dark_green', 'SUSPENDED': 'dark_red'}.get(qr.state.state.name, 'orange1') # color
+            style=text_color.get(qr.state.state.name, text_color['OTHER']) # color
         )
 
     return table
