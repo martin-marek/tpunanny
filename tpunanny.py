@@ -4,6 +4,7 @@ import time
 import logging
 import threading
 from fabric import Connection
+from concurrent.futures import ThreadPoolExecutor
 from google.cloud import tpu_v2
 from google.api_core.exceptions import NotFound
 client = tpu_v2.TpuClient()
@@ -73,18 +74,31 @@ def _delete(tpu_id, zone, project_id):
 
 
 def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None):
-    """Connects to TPU using SSH and runs `script`."""
+    """
+    Connects to TPU using SSH and runs `script`.
+    Run script on all hosts, return output only from first host.
+    """
     tpu_name = f'projects/{project_id}/locations/{zone}/nodes/{tpu_id}'
     tpu_info = client.get_node(name=tpu_name)
-    external_ip_address = tpu_info.network_endpoints[0].access_config.external_ip
-    result = Connection(external_ip_address).run(
-        script,
-        shell='/bin/bash -l',
-        out_stream=out_stream,
-        err_stream=err_stream,
+    ips = [endpoint.access_config.external_ip for endpoint in tpu_info.network_endpoints]
+    run_on_host = lambda ip, out, err, hide: Connection(ip).run(
+        script, shell='/bin/bash -l',
+        out_stream=out,
+        err_stream=err,
+        hide=hide,
         warn=True,
     )
-    return result
+    with ThreadPoolExecutor() as executor:    
+        futures = [
+            executor.submit(
+                run_on_host,
+                ip,
+                out_stream if i == 0 else None,
+                err_stream if i == 0 else None,
+                i > 0,
+            ) for i, ip in enumerate(ips)
+        ]
+        return futures[0].result()
 
 
 def _babysit(tpu_type, tpu_id, zone, project_id, script=None, stream_log=True):
@@ -101,7 +115,7 @@ def _babysit(tpu_type, tpu_id, zone, project_id, script=None, stream_log=True):
     
     # add file handler
     log_format = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-    file_handler = logging.FileHandler(f'logs/{tpu_id}.txt', 'w')
+    file_handler = logging.FileHandler(f'logs/{zone}-{tpu_id}.txt', 'w')
     file_handler.setFormatter(log_format)
     logger.addHandler(file_handler)
 
@@ -175,7 +189,7 @@ def babysit(idxs, tpu_type, zone, project_id, script=None):
         thread = threading.Thread(target=_babysit, args=(tpu_type, tpu_id, zone, project_id, script, False), daemon=True)
         thread.start()
         threads.append(thread)
-        time.sleep(5) # stagger creation
+        time.sleep(1) # stagger creation
     
     # keep main thread alive while threads are running
     while any(t.is_alive() for t in threads):
