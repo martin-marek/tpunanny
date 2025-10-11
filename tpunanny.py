@@ -34,7 +34,7 @@ def get_runtime(tpu_type):
     else: return 'tpu-ubuntu2204-base'
 
 
-def _create(tpu_type, tpu_id, zone, project_id):
+def _create(tpu_id, tpu_type, zone, project_id):
     parent = f'projects/{project_id}/locations/{zone}'
 
     queued_resource = tpu_v2.QueuedResource(
@@ -101,7 +101,7 @@ def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None):
         return futures[0].result()
 
 
-def _babysit(tpu_type, tpu_id, zone, project_id, script=None, stream_log=True):
+def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
     """(Re)creates TPU and runs `script`."""
     qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
     ran_script = False # have we already ran the script on this TPU?
@@ -186,7 +186,7 @@ def babysit(idxs, tpu_type, zone, project_id, script=None):
     threads = []
     for idx in idxs:
         tpu_id = f'tn-{tpu_type}-{idx}'
-        thread = threading.Thread(target=_babysit, args=(tpu_type, tpu_id, zone, project_id, script, False), daemon=True)
+        thread = threading.Thread(target=_babysit, args=(tpu_id, tpu_type, zone, project_id, script, False), daemon=True)
         thread.start()
         threads.append(thread)
         time.sleep(1) # stagger creation
