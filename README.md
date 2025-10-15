@@ -10,7 +10,7 @@ This library has similar goals to [tpucare](https://github.com/ClashLuke/tpucare
 import tpunanny as tn
 
 tn.babysit(
-    idxs=[0], # using a single TPU
+    idxs=slice(1), # using a single TPU, index 0
     tpu_type='v6e-1',
     zone='europe-west4-a',
     project_id='my_gcs_project_id',
@@ -44,9 +44,10 @@ wandb agent SWEEP_URL
 "
 """
 import tpunanny as tn
+import numpy as np
 
 tn.babysit(
-    idxs=range(8), # TPUs 0...7
+    idxs=np.s_[:8], # TPUs 0...7
     tpu_type='v6e-1',
     zone='europe-west4-a',
     project_id='personal-project-451418',
