@@ -11,46 +11,18 @@ import tpunanny as tn
 
 tn.babysit(
     idxs=slice(1), # using a single TPU, index 0
-    tpu_type='v6e-1',
+    tpu_type='v6e-8',
     zone='europe-west4-a',
     project_id='my_gcs_project_id',
     script='echo "hello world"',
 )
 ```
 
-# Example: wandb sweep
+# Setup
 
-```python
-setup_script = """
-# install libraries
-pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-pip install flax optax orbax numpy tqdm hydra-core wandb
-
-# add ~/.local/bin to PATH
-export PATH="$HOME/.local/bin:$PATH"
-
-# download dataset
-mkdir -p ~/datasets
-gsutil -m cp -r gs://llm-optim-europe-west4/fineweb_edu_gpt2_2.5B ~/datasets
-
-# download training codebase
-git clone --depth=1 https://github.com/martin-marek/picodo.git
-
-# start wandb agent
-tmux new-session -d "
-cd ~/REPO_DIR
-wandb login WANDB_KEY
-wandb agent SWEEP_URL
-"
-"""
-import tpunanny as tn
-import numpy as np
-
-tn.babysit(
-    idxs=np.s_[:8], # TPUs 0...7
-    tpu_type='v6e-1',
-    zone='europe-west4-a',
-    project_id='personal-project-451418',
-    script=setup_script,
-)
+First, install `requirements.txt`:
+```bash
+uv pip install -r requirements.txt
 ```
+
+Second, add your SSH public key to Google Cloud. [To do this](https://github.com/ayaka14732/tpu-starter?tab=readme-ov-file#42-add-an-ssh-public-key-to-google-cloud), type “SSH keys” into the Google Cloud webpage search box, go to the relevant page, then click edit, and add your computer's SSH public key.
