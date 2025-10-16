@@ -18,6 +18,16 @@ tn.babysit(
 )
 ```
 
+# Monitoring TPUs
+
+I included a helper utility to monitor the state of all TPUs within a single Google Cloud project:
+
+```bash
+python monitor.py 'picodo-455019'
+```
+
+<img src="https://github.com/martin-marek/tpunanny/blob/main/figures/monitor.jpg" width="650">
+
 # Setup
 
 First, install `requirements.txt`:
