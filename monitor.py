@@ -24,7 +24,7 @@ def generate_tpu_table(project_id):
 
     # create empty table
     table = Table()
-    for header in ['Request ID', 'Zone', 'Type', 'State', 'Created']:
+    for header in ['Request ID', 'Zone', 'Type', 'IP', 'State', 'Created']:
         table.add_column(header)
     table.caption = f'Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}'
     
@@ -41,16 +41,29 @@ def generate_tpu_table(project_id):
         }
         queued_resources = client.list_queued_resources(parent=f'projects/{project_id}/locations/-')
         for qr in sorted(queued_resources, key=lambda qr: natsort_key(qr.name.split('/')[-1])): # sort by name
+            zone = qr.name.split('/')[3]
+            qr_id = qr.name.split('/')[-1]
             time_created = qr.create_time
             time_now = datetime.now(time_created.tzinfo)
-            node = qr.tpu.node_spec[0].node
+            time_elapsed_str = str(timedelta(seconds=round((time_now - time_created).total_seconds()))).split(',')[0]
+
+            # get ip address
+            try:
+                tpu_id = qr.tpu.node_spec[0].node_id
+                tpu_name = f'projects/{project_id}/locations/{zone}/nodes/{tpu_id}'
+                tpu_info = client.get_node(name=tpu_name)
+                ip = sorted([endpoint.access_config.external_ip for endpoint in tpu_info.network_endpoints])[0]
+            except Exception:
+                ip = ''
+
             table.add_row(
-                qr.name.split('/')[-1], # request ID
-                qr.name.split('/')[3], # zone
-                node.accelerator_type, # accelerator type
-                qr.state.state.name, # state
-                str(timedelta(seconds=round((time_now - time_created).total_seconds()))).split(',')[0], # time created
-                style=text_color.get(qr.state.state.name, text_color['OTHER']) # text color
+                qr_id,
+                zone,
+                qr.tpu.node_spec[0].node.accelerator_type,
+                ip,
+                qr.state.state.name,
+                time_elapsed_str,
+                style=text_color.get(qr.state.state.name, text_color['OTHER'])
             )
     except exceptions.ServiceUnavailable:
         table.caption = f'⚠️ Connection error. Retrying... Last attempt: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
