@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from google.cloud import tpu_v2
 from google.api_core.exceptions import NotFound
 client = tpu_v2.TpuClient()
+_stop_event = threading.Event()
 
 
 class LoggerWriter:
@@ -158,7 +159,7 @@ def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None, idx
         return futures[0].result()
 
 
-def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
+def _babysit(tpu_id, tpu_type, zone, project_id, stop_event, script=None, stream_log=True):
     """(Re)creates TPU and runs `script`."""
     qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
     ran_script = False # have we already run the script on this TPU?
@@ -169,7 +170,7 @@ def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
 
     # remove previous log handlers
     for handler in logger.handlers[:]: logger.removeHandler(handler)
-    
+
     # add file handler
     log_format = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
     file_handler = logging.FileHandler(f'logs/{zone}-{tpu_id}.txt', 'w')
@@ -184,8 +185,8 @@ def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
 
     # run an infinite loop that maintains the TPU
     logger.info(f'starting to babysit {tpu_id}...')
-    while True:
-        
+    while not stop_event.is_set():
+
         # check if TPU is healthy
         logger.info('checking TPU status...')
         create_status = _recreate(tpu_id, tpu_type, zone, project_id)
@@ -194,15 +195,17 @@ def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
 
         # if script was provided, wait until TPU is ready, then run the script
         if not ran_script and script is not None:
-        
+
             # wait until TPU is ready
-            while True:
+            while not stop_event.is_set():
                 tpu_info = client.get_queued_resource(name=qr_name)
                 tpu_state = tpu_info.state.state.name
                 logger.info(f'TPU state={tpu_state}')
                 if tpu_state == 'ACTIVE': break
-                time.sleep(10)
-            
+                stop_event.wait(10)
+
+            if stop_event.is_set(): break
+
             # run script
             logger.info('running script...')
             stdout_writer = LoggerWriter(logger, logging.INFO)
@@ -213,11 +216,17 @@ def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
 
         # wait before checking on the TPU again
         logger.info('sleeping...')
-        time.sleep(60)
+        stop_event.wait(60)
 
 
 def babysit(idxs, tpu_type, zone, project_id, script=None):
     """Keeps multiple TPUs alive and running `script`."""
+    global _stop_event
+
+    # stop any previously running babysit threads
+    _stop_event.set()
+    time.sleep(2)
+    _stop_event = threading.Event()
 
     # crete output directory for logs
     if not os.path.exists('logs'): os.mkdir('logs')
@@ -226,11 +235,14 @@ def babysit(idxs, tpu_type, zone, project_id, script=None):
     threads = []
     for idx in idxs:
         tpu_id = f'tn-{tpu_type}-{idx}'
-        thread = threading.Thread(target=_babysit, args=(tpu_id, tpu_type, zone, project_id, script, False), daemon=True)
+        thread = threading.Thread(target=_babysit, args=(tpu_id, tpu_type, zone, project_id, _stop_event, script, False), daemon=True)
         thread.start()
         threads.append(thread)
         time.sleep(1) # stagger creation
-    
+
     # keep main thread alive while threads are running
-    while any(t.is_alive() for t in threads):
-        time.sleep(1)
+    try:
+        while any(t.is_alive() for t in threads):
+            time.sleep(1)
+    finally:
+        _stop_event.set()
