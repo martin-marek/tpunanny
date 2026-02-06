@@ -17,12 +17,10 @@ class LoggerWriter:
         self.level = level
 
     def write(self, message):
-        # Log only non-empty messages to avoid spamming newlines
         if message.strip():
             self.logger.log(self.level, message.strip())
 
     def flush(self):
-        # This method is required for file-like object compatibility
         pass
 
 
@@ -34,8 +32,12 @@ def get_runtime(tpu_type):
     else: return 'tpu-ubuntu2204-base'
 
 
-def _create(tpu_id, tpu_type, zone, project_id):
+def _create(tpu_id, tpu_type, zone, project_id, script=None):
     parent = f'projects/{project_id}/locations/{zone}'
+
+    node_metadata = {}
+    if script is not None:
+        node_metadata['startup-script'] = script
 
     queued_resource = tpu_v2.QueuedResource(
         tpu=tpu_v2.QueuedResource.Tpu(
@@ -47,6 +49,7 @@ def _create(tpu_id, tpu_type, zone, project_id):
                         accelerator_type=tpu_type,
                         runtime_version=get_runtime(tpu_type),
                         network_config=tpu_v2.NetworkConfig(enable_external_ips=True),
+                        metadata=node_metadata,
                     ),
                 )
             ]
@@ -73,14 +76,40 @@ def _delete(tpu_id, zone, project_id):
     return operation.result()
 
 
-def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None):
+def _recreate(tpu_id, tpu_type, zone, project_id, script=None):
+    qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
+    
+    try:
+        # get TPU status
+        tpu_info = client.get_queued_resource(name=qr_name)
+        tpu_state = tpu_info.state.state.name
+        
+        # if TPU is unhealthy, delete it and create a new one
+        if tpu_state in ('FAILED', 'SUSPENDED'):
+            _delete(tpu_id, zone, project_id)
+            time.sleep(30)
+            _create(tpu_id, tpu_type, zone, project_id, script)
+            return 're-created'
+
+    except NotFound as e:
+        # if TPU doesn't exist, create it
+        _create(tpu_id, tpu_type, zone, project_id)
+        return 'created'
+
+    return 'exists'
+
+
+def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None, idxs=None):
     """
     Connects to TPU using SSH and runs `script`.
     Run script on all hosts, return output only from first host.
+    Note: np.s_[:] is a convenient helper for slice indexing.
     """
     tpu_name = f'projects/{project_id}/locations/{zone}/nodes/{tpu_id}'
     tpu_info = client.get_node(name=tpu_name)
-    ips = [endpoint.access_config.external_ip for endpoint in tpu_info.network_endpoints]
+    ips = sorted([endpoint.access_config.external_ip for endpoint in tpu_info.network_endpoints])
+    print(f'{len(ips)=}')
+    if idxs is not None: ips = ips[idxs]
     run_on_host = lambda ip, out, err, hide: Connection(ip).run(
         script, shell='/bin/bash -l',
         out_stream=out,
@@ -95,7 +124,7 @@ def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None):
                 ip,
                 out_stream if i == 0 else None,
                 err_stream if i == 0 else None,
-                i > 0,
+                False,
             ) for i, ip in enumerate(ips)
         ]
         return futures[0].result()
@@ -104,7 +133,7 @@ def _run(tpu_id, zone, project_id, script, out_stream=None, err_stream=None):
 def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
     """(Re)creates TPU and runs `script`."""
     qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
-    ran_script = False # have we already ran the script on this TPU?
+    ran_script = False # have we already run the script on this TPU?
 
     # create logger for this TPU
     logger = logging.getLogger(tpu_id)
@@ -131,26 +160,9 @@ def _babysit(tpu_id, tpu_type, zone, project_id, script=None, stream_log=True):
         
         # check if TPU is healthy
         logger.info('checking TPU status...')
-        try:
-            # get TPU status
-            tpu_info = client.get_queued_resource(name=qr_name)
-            tpu_state = tpu_info.state.state.name
-            logger.info(f'TPU found, state={tpu_state}')
-            
-            # if TPU is unhealthy, delete it
-            if tpu_state in ('FAILED', 'SUSPENDED'):
-                logger.info('deleting TPU...')
-                _delete(tpu_id, zone, project_id)
-                time.sleep(10)
-                raise NotFound('TPU deleted')
-
-        except NotFound as e:
-            # if TPU doesn't exist, create it
-            logger.info('TPU not found')
-            logger.info('creating TPU...')
-            _create(tpu_type, tpu_id, zone, project_id)
-            ran_script = False
-
+        create_status = _recreate(tpu_id, tpu_type, zone, project_id)
+        logger.info(f'TPU status: {create_status}')
+        if create_status != 'exists': ran_script = False
 
         # if script was provided, wait until TPU is ready, then run the script
         if not ran_script and script is not None:
