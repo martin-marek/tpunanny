@@ -76,6 +76,34 @@ def _delete(tpu_id, zone, project_id):
     return operation.result()
 
 
+def _delete_all_suspended(project_id):
+    """
+    Deletes all queued resources in SUSPENDED state across all zones.
+    Returns a list of dicts with 'tpu_id' and 'zone' for each deleted resource.
+    """
+    locations = client.list_locations(request={"name": f'projects/{project_id}'})
+    zones = [loc.location_id for loc in locations]
+
+    deleted = []
+    for zone in zones:
+        parent = f'projects/{project_id}/locations/{zone}'
+        queued_resources = client.list_queued_resources(parent=parent)
+        for qr in queued_resources:
+            state = qr.state.state.name
+            if state == 'SUSPENDED':
+                tpu_id = qr.name.split('/')[-1]
+                try:
+                    _delete(tpu_id, zone, project_id)
+                    deleted.append({'tpu_id': tpu_id, 'zone': zone})
+                    logging.info(f'Deleted suspended queued resource {tpu_id} in {zone}')
+                except NotFound:
+                    logging.warning(f'Queued resource {tpu_id} in {zone} not found (already deleted?)')
+                except Exception as e:
+                    logging.error(f'Failed to delete {tpu_id} in {zone}: {e}')
+
+    return deleted
+
+
 def _recreate(tpu_id, tpu_type, zone, project_id, script=None):
     qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
     
