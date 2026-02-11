@@ -10,6 +10,16 @@ from rich.table import Table
 
 client = tpu_v2.TpuClient()
 
+TEXT_COLOR = {
+    'ACTIVE': 'dark_green',
+    'PROVISIONING': 'dodger_blue2',
+    'WAITING_FOR_RESOURCES': 'dodger_blue2',
+    'SUSPENDING': 'dark_red',
+    'SUSPENDED': 'dark_red',
+    'FAILED': 'dark_red',
+    'OTHER': 'grey50'
+}
+
 def natsort_key(s):
     parts = re.split(r'(\d+)', s)
     parts[1::2] = map(int, parts[1::2])
@@ -22,16 +32,6 @@ def generate_tpu_table(project_id):
     table.caption = f'Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
 
     try:
-        text_color = {
-            'ACTIVE': 'dark_green',
-            'PROVISIONING': 'dodger_blue2',
-            'WAITING_FOR_RESOURCES': 'dodger_blue2',
-            'SUSPENDING': 'dark_red',
-            'SUSPENDED': 'dark_red',
-            'FAILED': 'dark_red',
-            'OTHER': 'grey50'
-        }
-
         # Fetch all resources once to avoid N+1 query problem
         queued_resources = client.list_queued_resources(parent=f'projects/{project_id}/locations/-')
         all_nodes = list(client.list_nodes(parent=f'projects/{project_id}/locations/-'))
@@ -68,7 +68,7 @@ def generate_tpu_table(project_id):
                 ip,
                 qr.state.state.name,
                 time_elapsed_str,
-                style=text_color.get(qr.state.state.name, text_color['OTHER'])
+                style=TEXT_COLOR.get(qr.state.state.name, TEXT_COLOR['OTHER'])
             )
 
     except exceptions.ServiceUnavailable:
