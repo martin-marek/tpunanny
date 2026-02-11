@@ -89,7 +89,7 @@ def _delete_all_suspended(project_id):
         zone = qr.name.split('/')[3]
         qr_id = qr.name.split('/')[-1]
         state = qr.state.state.name
-        if state == 'SUSPENDED':
+        if state in ('FAILED', 'SUSPENDED'):
             try:
                 _delete(qr_id, zone, project_id)
                 deleted.append({'tpu_id': qr_id, 'zone': zone})
