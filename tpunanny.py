@@ -68,13 +68,10 @@ def _create(tpu_id, tpu_type, zone, project_id, script=None):
 
 
 def _delete(tpu_id, zone, project_id):
-    """
-    This function can only delete TPU in the following states:
-    (ACCEPTED, WAITING_FOR_RESOURCES, SUSPENDED, FAILED)
-    """
     qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
-    operation = client.delete_queued_resource(name=qr_name)
-    return operation.result()
+    request = tpu_v2.DeleteQueuedResourceRequest(name=qr_name, force=True)
+    operation = client.delete_queued_resource(request=request)
+    return operation
 
 
 def _delete_all_suspended(project_id):
@@ -83,21 +80,24 @@ def _delete_all_suspended(project_id):
     Returns a list of dicts with 'tpu_id' and 'zone' for each deleted resource.
     """
 
-    deleted = []
+    deleted, pending = [], []
     queued_resources = client.list_queued_resources(parent=f'projects/{project_id}/locations/-')
     for qr in queued_resources:
         zone = qr.name.split('/')[3]
         qr_id = qr.name.split('/')[-1]
         state = qr.state.state.name
         if state in ('FAILED', 'SUSPENDED'):
-            try:
-                _delete(qr_id, zone, project_id)
-                deleted.append({'tpu_id': qr_id, 'zone': zone})
-                logging.info(f'Deleted suspended queued resource {qr_id} in {zone}')
-            except NotFound:
-                logging.warning(f'Queued resource {qr_id} in {zone} not found (already deleted?)')
-            except Exception as e:
-                logging.error(f'Failed to delete {qr_id} in {zone}: {e}')
+            pending.append((_delete(qr_id, zone, project_id), qr_id, zone))
+
+    for operation, qr_id, zone in pending:
+        try:
+            operation.result()
+            deleted.append({'tpu_id': qr_id, 'zone': zone})
+            logging.info(f'Deleted suspended queued resource {qr_id} in {zone}')
+        except NotFound:
+            logging.warning(f'Queued resource {qr_id} in {zone} not found (already deleted?)')
+        except Exception as e:
+            logging.error(f'Failed to delete {qr_id} in {zone}: {e}')
 
     return deleted
 
@@ -112,7 +112,7 @@ def _recreate(tpu_id, tpu_type, zone, project_id, script=None):
         
         # if TPU is unhealthy, delete it and create a new one
         if tpu_state in ('FAILED', 'SUSPENDED'):
-            _delete(tpu_id, zone, project_id)
+            _delete(tpu_id, zone, project_id).result()
             time.sleep(30)
             _create(tpu_id, tpu_type, zone, project_id, script)
             return 're-created'
