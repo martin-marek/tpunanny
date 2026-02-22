@@ -1,4 +1,3 @@
 google-cloud-tpu
-fabric
 rich
 fire
