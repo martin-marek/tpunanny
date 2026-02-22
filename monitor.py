@@ -25,7 +25,7 @@ def natsort_key(s):
     parts[1::2] = map(int, parts[1::2])
     return parts
 
-def generate_tpu_table(project_id):
+def generate_tpu_table(project_id, timeout=10):
     table = Table()
     for header in ['Request ID', 'Zone', 'Type', 'IP', 'State', 'Created']:
         table.add_column(header)
@@ -33,8 +33,8 @@ def generate_tpu_table(project_id):
 
     try:
         # Fetch all resources once to avoid N+1 query problem
-        queued_resources = client.list_queued_resources(parent=f'projects/{project_id}/locations/-')
-        all_nodes = list(client.list_nodes(parent=f'projects/{project_id}/locations/-'))
+        queued_resources = client.list_queued_resources(parent=f'projects/{project_id}/locations/-', timeout=timeout)
+        all_nodes = list(client.list_nodes(parent=f'projects/{project_id}/locations/-', timeout=timeout))
         
         # Create lookup map for faster access
         node_map = {node.name: node for node in all_nodes}
@@ -71,8 +71,9 @@ def generate_tpu_table(project_id):
                 style=TEXT_COLOR.get(qr.state.state.name, TEXT_COLOR['OTHER'])
             )
 
-    except exceptions.ServiceUnavailable:
-        table.caption = f'⚠️ Connection error. Retrying... Last attempt: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+    except Exception as e:
+        error_type = type(e).__name__
+        table.caption = f'⚠️ Connection ({error_type}). Retrying... Last attempt: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
 
     return table
 
