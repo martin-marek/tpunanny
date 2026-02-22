@@ -5,6 +5,7 @@ from google.cloud import tpu_v2
 from google.api_core.exceptions import NotFound
 client = tpu_v2.TpuClient()
 _stop_event = threading.Event()
+_threads = []
 
 
 def get_runtime(tpu_type):
@@ -95,7 +96,9 @@ def _recreate(tpu_id, tpu_type, zone, project_id, startup_script=None):
         # if TPU is unhealthy, delete it and create a new one
         if tpu_state in ('FAILED', 'SUSPENDED'):
             _delete(tpu_id, zone, project_id).result()
-            time.sleep(30)
+            if not _wait_for_absence(qr_name):
+                print(f'[{tpu_id}] waiting for deletion timed out; will retry.')
+                return 'deleting'
             _create(tpu_id, tpu_type, zone, project_id, startup_script)
             return 're-created'
 
@@ -105,6 +108,18 @@ def _recreate(tpu_id, tpu_type, zone, project_id, startup_script=None):
         return 'created'
 
     return 'exists'
+
+
+def _wait_for_absence(qr_name, timeout_seconds=300, poll_seconds=5):
+    """Waits until queued resource is deleted, returns False on timeout."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            client.get_queued_resource(name=qr_name)
+        except NotFound:
+            return True
+        time.sleep(poll_seconds)
+    return False
 
 
 def _run(tpu_id, zone, project_id, ssh_script):
@@ -163,11 +178,13 @@ def _babysit(tpu_id, tpu_type, zone, project_id, stop_event, ssh_script=None, st
 
 def babysit(idxs, tpu_type, zone, project_id, ssh_script=None, startup_script=None):
     """Keeps multiple TPUs alive, optionally running `ssh_script` and `startup_script` on boot."""
-    global _stop_event
+    global _stop_event, _threads
 
     # stop any previously running babysit threads
     _stop_event.set()
-    time.sleep(2)
+    for thread in _threads:
+        thread.join(timeout=5)
+    _threads = []
     _stop_event = threading.Event()
 
     # create and start a thread for each TPU
@@ -181,11 +198,14 @@ def babysit(idxs, tpu_type, zone, project_id, ssh_script=None, startup_script=No
         )
         thread.start()
         threads.append(thread)
-        time.sleep(1) # stagger creation
+        _stop_event.wait(1) # stagger creation
 
     # keep main thread alive while threads are running
     try:
+        _threads = threads
         while any(t.is_alive() for t in threads):
-            time.sleep(1)
+            _stop_event.wait(1)
     finally:
         _stop_event.set()
+        for thread in threads:
+            thread.join(timeout=5)
