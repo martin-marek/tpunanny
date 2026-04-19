@@ -33,6 +33,7 @@ def _create(tpu_id, tpu_type, zone, project_id, startup_script=None):
                         accelerator_type=tpu_type,
                         runtime_version=get_runtime(tpu_type),
                         network_config=tpu_v2.NetworkConfig(enable_external_ips=True),
+                        labels={'a': 'b'}, # dummy labels to avoid gcp bug
                         metadata=node_metadata,
                     ),
                 )
