@@ -1,14 +1,25 @@
+import os
 import re
+import subprocess
 import sys
 import time
+
+# Must be set before the google.cloud import: stops gRPC's fork handler from
+# logging "FD from fork parent still in poll list" on every gcloud-ssh fork.
+os.environ.setdefault('GRPC_ENABLE_FORK_SUPPORT', 'false')
+
 import fire
 from google.cloud import tpu_v2
-from google.api_core import exceptions
 from datetime import datetime, timedelta
 from rich.live import Live
 from rich.table import Table
 
 client = tpu_v2.TpuClient()
+HOSTNAME_CACHE, HOSTNAME_PROCS = {}, {}
+
+# gcloud ssh ignores ~/.ssh/config and defaults to the local OS user, so the
+# TPU-side username must be passed explicitly.
+SSH_USER = os.environ.get('TPU_SSH_USER', 'martin')
 
 TEXT_COLOR = {
     'ACTIVE': 'dark_green',
@@ -27,7 +38,7 @@ def natsort_key(s):
 
 def generate_tpu_table(project_id, timeout=10):
     table = Table()
-    for header in ['Request ID', 'Zone', 'Type', 'IP', 'State', 'Created']:
+    for header in ['Request ID', 'Hostname', 'Zone', 'Type', 'IP', 'State', 'Created']:
         table.add_column(header)
     table.caption = f'Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
 
@@ -49,6 +60,7 @@ def generate_tpu_table(project_id, timeout=10):
             time_elapsed_str = str(timedelta(seconds=round((time_now - time_created).total_seconds()))).split(',')[0]
 
             # Resolve IP from pre-fetched node map
+            hostname = ''
             ip = ''
             try:
                 tpu_id = qr.tpu.node_spec[0].node_id
@@ -58,11 +70,20 @@ def generate_tpu_table(project_id, timeout=10):
                     endpoints = node_map[tpu_name].network_endpoints
                     if endpoints:
                         ip = sorted([ep.access_config.external_ip for ep in endpoints])[0]
+                        if qr.state.state.name == 'ACTIVE':
+                            hostname = HOSTNAME_CACHE.get(tpu_name, '')
+                            proc = HOSTNAME_PROCS.get(tpu_name)
+                            if not hostname and proc is None:
+                                HOSTNAME_PROCS[tpu_name] = subprocess.Popen(['gcloud', '--quiet', 'compute', 'tpus', 'tpu-vm', 'ssh', f'{SSH_USER}@{tpu_id}', f'--zone={zone}', f'--project={project_id}', '--worker=0', '--command=hostname'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+                            elif not hostname and proc.poll() is not None:
+                                HOSTNAME_CACHE[tpu_name] = hostname = (proc.stdout.read().strip().splitlines() or [''])[-1] if proc.returncode == 0 else ''
+                                HOSTNAME_PROCS.pop(tpu_name, None)
             except Exception:
                 pass
 
             table.add_row(
                 qr_id,
+                hostname,
                 zone,
                 qr.tpu.node_spec[0].node.accelerator_type,
                 ip,

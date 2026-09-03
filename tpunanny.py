@@ -1,9 +1,14 @@
+import os
 import time
 import subprocess
 import threading
 from google.cloud import tpu_v2
 from google.api_core.exceptions import NotFound
 client = tpu_v2.TpuClient()
+
+# gcloud ssh ignores ~/.ssh/config and defaults to the local OS user, so the
+# TPU-side username must be passed explicitly.
+SSH_USER = os.environ.get('TPU_SSH_USER', 'martin')
 _stop_event = threading.Event()
 _threads = []
 
@@ -125,17 +130,33 @@ def _wait_for_absence(qr_name, timeout_seconds=300, poll_seconds=5):
 
 def _run(tpu_id, zone, project_id, ssh_script):
     """Runs `ssh_script` on all workers of a TPU VM via gcloud SSH."""
-    import os
     output_dir = f'logs/{zone}/{tpu_id}'
     os.makedirs(output_dir, exist_ok=True)
     cmd = [
-        'gcloud', 'compute', 'tpus', 'tpu-vm', 'ssh', tpu_id,
+        'gcloud', 'compute', 'tpus', 'tpu-vm', 'ssh', f'{SSH_USER}@{tpu_id}',
         f'--zone={zone}',
         f'--project={project_id}',
         '--worker=all',
         f'--command={ssh_script}',
         f'--output-directory={output_dir}',
     ]
+    qr_name = f'projects/{project_id}/locations/{zone}/queuedResources/{tpu_id}'
+    try:
+        tpu_info = client.get_queued_resource(name=qr_name)
+        tpu_state = tpu_info.state.state.name
+    except NotFound:
+        message = f'[{tpu_id}] skipping ssh script: queued resource not found.'
+        print(message)
+        return subprocess.CompletedProcess(cmd, 2, stdout='', stderr=message)
+    except Exception as e:
+        # Fall back to gcloud SSH if the preflight state check fails for reasons
+        # unrelated to the TPU lifecycle.
+        print(f'[{tpu_id}] warning: failed to check TPU state before SSH: {e}')
+    else:
+        if tpu_state != 'ACTIVE':
+            message = f'[{tpu_id}] skipping ssh script: TPU state={tpu_state} (requires ACTIVE).'
+            print(message)
+            return subprocess.CompletedProcess(cmd, 3, stdout='', stderr=message)
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
